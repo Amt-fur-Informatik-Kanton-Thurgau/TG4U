@@ -1,0 +1,7 @@
+{
+  "heidiApiBaseUrl": "__PLATFORM_BASE_URL__",
+  "heidiEntityWsBaseUrl": "__PLATFORM_BASE_URL__",
+  "heidiDefaultNamespace": "org.iso.18013.5.1",
+  "heidiDefaultDoctype": "org.iso.18013.5.1.mDL",
+  "appVersion": "tg4u-local"
+}

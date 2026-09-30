@@ -1,0 +1,131 @@
+{{- if .Values.global.devDatabase.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: heidi-dev-postgres-data
+  namespace: {{ .Values.global.namespace }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.global.devDatabase.postgres.storage }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: heidi-dev-postgres-credentials
+  namespace: {{ .Values.global.namespace }}
+type: Opaque
+stringData:
+  POSTGRES_DB: {{ .Values.global.devDatabase.postgres.database | quote }}
+  POSTGRES_USER: {{ .Values.global.devDatabase.postgres.username | quote }}
+  POSTGRES_PASSWORD: {{ .Values.global.devDatabase.postgres.password | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heidi-dev-postgres
+  namespace: {{ .Values.global.namespace }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: heidi-dev-postgres
+  template:
+    metadata:
+      labels:
+        app: heidi-dev-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.global.devDatabase.postgres.image }}
+          envFrom:
+            - secretRef:
+                name: heidi-dev-postgres-credentials
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            # Postgres 18 moved PGDATA to /var/lib/postgresql/<major>/docker and
+            # declares the volume one level up, at /var/lib/postgresql, which is also
+            # what the pinned Heidi Platform development Compose file mounts.
+            # Mounting the old .../data path here would leave the database on the container's
+            # writable layer and lose it on every restart.
+            - name: postgres-data
+              mountPath: /var/lib/postgresql
+              subPath: postgres
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: heidi-dev-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: heidi-dev-postgres
+  namespace: {{ .Values.global.namespace }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+  selector:
+    app: heidi-dev-postgres
+{{- end }}
+---
+{{- if .Values.global.devDatabase.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: heidi-dev-postgres-init
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: postgres-init
+          image: {{ .Values.global.devDatabase.postgres.image }}
+          envFrom:
+            - secretRef:
+                name: heidi-dev-postgres-credentials
+          command:
+            - /bin/bash
+            - -c
+            - |
+              export PGPASSWORD="$POSTGRES_PASSWORD"
+              until pg_isready -h heidi-dev-postgres -U "$POSTGRES_USER"; do
+                echo "Waiting for postgres to be ready..."
+                sleep 2
+              done
+              {{- $seen := dict }}
+              {{- /* Every Spring service that may need a dev database — keep in sync with values.yaml */}}
+              {{- $svcs := list .Values.platformApi .Values.issuer .Values.verifier }}
+              {{- $signing := .Values.signing | default dict }}
+              {{- if and $signing.enabled (($signing.persistence | default dict).enabled) }}
+                {{- $svcs = append $svcs $signing }}
+              {{- end }}
+              {{- range $svc := $svcs }}
+                {{- if and $svc $svc.enabled }}
+                  {{- $db := $.Values.global.devDatabase.postgres.database }}
+                  {{- /* <service>.database.name, or its former name
+                         <service>.devDatabase.database */}}
+                  {{- $db = (($svc.database | default dict).name | default (($svc.devDatabase | default dict).database)) | default $db }}
+                  {{- $_ := set $seen $db "" }}
+                {{- end }}
+              {{- end }}
+              {{- range $db, $_ := $seen }}
+              echo "Ensuring database exists: {{ $db }}"
+              psql -h heidi-dev-postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                -tc "SELECT 1 FROM pg_database WHERE datname = '{{ $db }}'" | grep -q 1 || \
+              psql -h heidi-dev-postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                -c "CREATE DATABASE \"{{ $db }}\""
+              {{- end }}
+{{- end }}

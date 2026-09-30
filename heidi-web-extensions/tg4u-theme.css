@@ -1,0 +1,133 @@
+/*
+ * TG4U cockpit colors follow the Canton of Thurgau digital-product palette:
+ * https://rembrand-agentur.frontify.com/marketg
+ */
+:root {
+  /* Brand 01 guides the user journey; Brand 02 marks selection; Brand 03 marks
+     the current point. The light and dark steps map the published palette to
+     the semantic color tokens used by the Heidi Platform cockpit. */
+  --color-glacier: #327a1e;
+  --color-glacier-5: #ffffff;
+  --color-glacier-10: #f5f5f5;
+  --color-glacier-20: #daedff;
+  --color-glacier-30: #c1e1ff;
+  --color-glacier-40: #a1cef7;
+  --color-glacier-60: #a1cef7;
+  --color-glacier-80: #327a1e;
+  --color-glacier-100: #327a1e;
+  --color-glacier-120: #176822;
+  --color-glacier-140: #12531b;
+  --color-glacier-160: #12531b;
+  --color-glacier-180: #12531b;
+  --color-glacier-200: #12531b;
+  --color-glacier-220: #12531b;
+
+  --color-green: #327a1e;
+  --color-green-10: #eaf5e8;
+  --color-green-120: #176822;
+  --color-orange: #f28f1c;
+  --color-orange-10: #fff2e3;
+  --color-orange-120: #c6760e;
+  --color-red: #f24822;
+  --color-red-10: #fdece8;
+  --color-red-120: #c53618;
+  --color-violet: #8944e0;
+  --color-violet-10: #f1e9fc;
+  --color-violet-120: #6d32b0;
+
+  --color-text-primary: #333333;
+  --color-text-secondary: #767676;
+  --color-text-invert: #ffffff;
+  --color-text-invert-secondary: #c1e1ff;
+  --color-text-disabled: #767676;
+
+  --color-accent-primary: #327a1e;
+  --color-accent-secondary: #327a1e;
+  --color-accent-green: #327a1e;
+  --color-accent-red: #f24822;
+  --color-accent-violet: #8944e0;
+
+  --color-surface: #ffffff;
+  --color-surface-secondary: #f5f5f5;
+  --color-surface-tertiary: #ebebeb;
+  --color-surface-light-blue: #daedff;
+  --color-surface-disabled: #ebebeb;
+  --color-surface-invert: #12531b;
+  --color-surface-light-green: #eaf5e8;
+  --color-surface-light-red: #fdece8;
+  --color-border: #d3d3d3;
+  --color-border-primary: #daedff;
+  --color-border-secondary: #c1e1ff;
+
+  --color-infocard-success: #327a1e;
+  --color-infocard-success-light: #eaf5e8;
+  --color-infocard-error: #f24822;
+  --color-infocard-error-light: #fdece8;
+  --color-infocard-warning: #f28f1c;
+  --color-infocard-warning-light: #fff2e3;
+  --color-verifier-blue: #1849c8;
+  --color-verifier-lightBlue: #a1cef7;
+  --color-verifier-background: #daedff;
+
+  --color-background: #ffffff;
+  --color-foreground: #333333;
+  --color-card: #ffffff;
+  --color-card-foreground: #333333;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #333333;
+  --color-primary: #327a1e;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #daedff;
+  --color-secondary-foreground: #333333;
+  --color-muted: #f5f5f5;
+  --color-muted-foreground: #767676;
+  --color-accent: #c1e1ff;
+  --color-accent-foreground: #333333;
+  --color-destructive: #f24822;
+  --color-destructive-foreground: #ffffff;
+  --color-input: #ffffff;
+  --color-ring: #327a1e;
+  --color-sidebar: #12531b;
+  --color-sidebar-foreground: #ffffff;
+  --color-sidebar-primary: #fde303;
+  --color-sidebar-primary-foreground: #333333;
+  --color-sidebar-accent: #176822;
+  --color-sidebar-accent-foreground: #ffffff;
+  --color-sidebar-border: #176822;
+  --color-sidebar-ring: #fde303;
+}
+
+/* Keep the cockpit's dark organisation surface on the same palette. */
+:where(.organisations, .organisations *) {
+  --color-text-primary: #ffffff;
+  --color-text-invert: #333333;
+  --color-accent-primary: #fde303;
+  --color-surface: #12531b;
+  --color-border: #176822;
+  --color-background: #12531b;
+  --color-foreground: #ffffff;
+  --color-card: #12531b;
+  --color-card-foreground: #ffffff;
+  --color-popover: #12531b;
+  --color-popover-foreground: #ffffff;
+  --color-primary: #327a1e;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #176822;
+  --color-secondary-foreground: #ffffff;
+  --color-muted: #176822;
+  --color-muted-foreground: #daedff;
+  --color-accent: #176822;
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #f24822;
+  --color-destructive-foreground: #ffffff;
+  --color-input: #176822;
+  --color-ring: #fde303;
+  --color-sidebar: #12531b;
+  --color-sidebar-foreground: #ffffff;
+  --color-sidebar-primary: #fde303;
+  --color-sidebar-primary-foreground: #333333;
+  --color-sidebar-accent: #176822;
+  --color-sidebar-accent-foreground: #ffffff;
+  --color-sidebar-border: #176822;
+  --color-sidebar-ring: #fde303;
+}

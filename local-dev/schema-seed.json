@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "tenantId": "acme",
+      "issuerSlug": "acme",
+      "credentialSchemas": ["credential-schema-wohnsitzbestaetigung.json"],
+      "proofSchemas": ["proof-schema-wohnsitzbestaetigung.json"]
+    }
+  ]
+}

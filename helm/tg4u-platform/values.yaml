@@ -1,0 +1,546 @@
+# Default values for tg4u-platform
+# This is a YAML-formatted file.
+#
+# The chart deploys five service images published by the TG4U release workflow:
+#
+#   platformApi  tg4u-platform-api      the combined platform API
+#   issuer       tg4u-issuer            OID4VCI issuance
+#   verifier     tg4u-verifier          OID4VP presentation
+#   signing      tg4u-signing-service   credential signing
+#   web          tg4u-web               the cockpit frontend
+#
+# All images come from global.imageRegistry below.
+#
+# They are configured entirely through environment variables. The chart computes
+# the ones that follow from the deployment itself — every service URL — and
+# everything else is a key under <service>.config; see templates/common/_service-env.tpl
+# for what is filled in automatically.
+
+global:
+  project: tg4u
+  namespace: tg4u
+  environment: dev
+  # Which deployment of this chart this is, for the resources that do not live
+  # in global.namespace: the Ingress objects, their TLS Secrets and their
+  # ExternalName aliases, which a cluster with a shared ingress controller keeps
+  # together in one namespace (pathRouting.ingressNamespace below). Two
+  # deployments of this chart would otherwise both claim
+  # tg4u-web-dev-ingress-rule there and the second install would fail on the
+  # name the first owns. Empty means global.namespace, which is already unique
+  # per deployment; set it to prefix those names with something else.
+  instance: ""
+  path: ""
+  # Base domain for all ingress hosts. Each service composes its host as
+  # <ingress.subdomain>.<baseDomain>, or uses <baseDomain> itself when it
+  # declares no subdomain. A service can set ingress.hosts to override entirely.
+  baseDomain: example.com
+  clusterIssuer: letsencrypt-staging
+
+  # ---------------------------------------------------------------------------
+  # Path routing — the whole stack on one host
+  # ---------------------------------------------------------------------------
+  # Off: every service gets its own subdomain and its own ingress, and the
+  # cockpit's calls to the API are cross-origin.
+  #
+  # On: one host, one certificate, one origin, and the services are told apart
+  # by the prefixes below. The chart appends each prefix to that service's
+  # public base URL, so credential offers, entity statements and QR codes carry
+  # it too; the ingress strips it again on the way in. Internal calls are
+  # untouched — a pod still reaches a Service directly.
+  #
+  # Only the paths wallets and browsers need are routed; see
+  # templates/common/_shared-ingress.tpl for the table and what it leaves out.
+  # Changing a prefix changes the credential issuer identifier and the verifier's
+  # federation entity identifier, so credentials issued before the change no
+  # longer resolve.
+  pathRouting:
+    enabled: false
+    # The one host. Defaults to baseDomain.
+    host: ""
+    # The address to hand out when it is not https://<host> — a cluster reached
+    # through a port-forward of the ingress controller, say. Each prefix hangs
+    # off it. Defaults to https://<host>.
+    # publicUrl: http://machine.example:8080
+    #
+    # Where the Ingress objects go. A cluster whose ingress controller lives in
+    # its own namespace keeps them next to it, and the chart adds an
+    # ExternalName alias per service so the rules can reach the workload. Empty
+    # means global.namespace: the Ingress sits with the pods and needs no alias,
+    # which is what a controller watching every namespace wants.
+    ingressNamespace: ingress-basic
+    # Off for a cluster with no cert-manager; the rules then serve plain HTTP.
+    tls: true
+    # Written to spec.ingressClassName. The legacy class annotation is always
+    # set; name the class as well where the controller ignores it.
+    ingressClassName: ""
+    # tlsSecretName: defaults to tls-secret-<instance>-<environment>
+    # The web takes the root, so its prefix is empty. A service left out of this
+    # map keeps its own host — the signing service, which is internal anyway.
+    prefixes:
+      web: ""
+      platformApi: /api
+      issuer: /issuer
+      verifier: /verifier
+
+  # ---------------------------------------------------------------------------
+  # Images
+  # ---------------------------------------------------------------------------
+  # The TG4U release workflow tags all five images together, so pinning the
+  # release is one edit here. A service can override image.registry/image.tag
+  # when it uses a different registry or build than the rest of the stack.
+  # The aliases
+  # image.imageRegistry/image.imageTag are accepted for overlays that mirror
+  # these global names.
+  #
+  # Public images are published to the GitHub Container Registry namespace of
+  # Amt für Informatik Kanton Thurgau. Set imageTag to a published TG4U release;
+  # it is deliberately empty by default so a deployment always chooses a tag.
+  # For a private registry or mirror, set imagePullSecrets to an existing
+  # docker-registry Secret in global.namespace.
+  imageRegistry: ghcr.io/amt-fur-informatik-kanton-thurgau
+  imageTag: ""
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+  # ---------------------------------------------------------------------------
+  # Spring profiles
+  # ---------------------------------------------------------------------------
+  # `no-security` grants every role to every caller — the platform ships without
+  # authentication and this is the profile that makes it run without an identity
+  # provider. It is only defensible behind an authenticating proxy, or on a
+  # cluster nobody else can reach. To use an OIDC provider instead, clear this
+  # and set spring.security.oauth2.resourceserver.jwt.issuer-uri through
+  # <service>.config.
+  #
+  # The issuer image additionally pins spring.profiles.active=local in its
+  # application.properties; the value here always overrides it, which is what
+  # keeps its localhost datasource defaults out of the cluster.
+  springProfiles: "no-security"
+
+  # ---------------------------------------------------------------------------
+  # Dev Database — a Postgres container this chart deploys
+  # ---------------------------------------------------------------------------
+  # One PostgreSQL Deployment, Service and PVC in global.namespace, for
+  # development. A post-install Job creates a separate database for each service,
+  # matching the local development setup.
+  #
+  # This is one of the two mutually exclusive answers to "which SERVER"; the
+  # other is externalDatabase below. Which database each service uses inside it
+  # is a separate question, answered per service by <service>.database.
+  devDatabase:
+    enabled: true
+    postgres:
+      # Matches the local development database. Changing the MAJOR version needs
+      # a fresh PVC — Postgres will not start on a data directory written by
+      # another major release (delete the heidi-dev-postgres-data PVC to discard it).
+      image: postgres:18-alpine
+      storage: 1Gi
+      database: heidi_platform_api
+      username: heidi_dev_user
+      password: dev-db-password
+
+  # ---------------------------------------------------------------------------
+  # External Database — a Postgres server that already exists
+  # ---------------------------------------------------------------------------
+  # Azure Database for PostgreSQL, RDS, a Postgres somebody else operates. The
+  # chart deploys nothing and only connects. Enabling it takes over the
+  # datasource of every service that has one; turn devDatabase.enabled off
+  # alongside, or the chart deploys a Postgres container nothing connects to.
+  #
+  # Each service still needs its OWN database on that server, because the three
+  # Spring services each run their own migrations and would collide in a shared
+  # schema. Nothing here creates them — the post-install Job only ever talks to
+  # the in-cluster Postgres — so they have to exist before the first deploy.
+  # Which one each service uses is set per service under <service>.database.
+  externalDatabase:
+    enabled: false
+    host: ""
+    port: 5432
+    # One role for all three databases, unless a service overrides it under
+    # <service>.database.username/password. It needs full rights on them —
+    # the services create their own schema on start-up.
+    username: ""
+    password: ""
+    # Appended to the JDBC URL verbatim, so it carries its own leading "?".
+    # A managed Postgres normally wants at least ?sslmode=require.
+    jdbcParams: "?sslmode=require"
+    # A Secret that already exists in global.namespace, so no credential is
+    # written into this file. It replaces the rendered <service>-database Secret.
+    # Set it per service under <service>.database.existingSecret — the usual
+    # shape, since each service needs its own database.
+    #
+    # By default the Secret is handed to the container whole, through a
+    # secretRef, and must carry these three keys under exactly these names:
+    #
+    #   SPRING_DATASOURCE_URL       jdbc:postgresql://<host>:<port>/<database>
+    #   SPRING_DATASOURCE_USERNAME
+    #   SPRING_DATASOURCE_PASSWORD
+    #
+    # The URL comes from the Secret in one piece, so host, port, database and
+    # jdbcParams above are then unused. Rolling a changed Secret out needs a
+    # `kubectl rollout restart` — the chart only checksums Secrets it renders
+    # itself.
+    existingSecret: ""
+    # Fill these in only if the Secret stores the fields separately instead —
+    # `database: POSTGRES_DB`, and so on. Naming any key at all switches the
+    # chart to reading them key by key with a secretKeyRef and assembling
+    # SPRING_DATASOURCE_URL itself, out of these values and the host, port and
+    # jdbcParams above (a key left empty is taken from this file). It has to
+    # assemble it in the container's env list rather than in a Secret, because
+    # Kubernetes' $(VAR) expansion only reaches variables declared earlier in
+    # that same list — never ones arriving through a secretRef. Nothing
+    # sensitive lands in the Deployment either way.
+    secretKeys:
+      database: ""
+      username: ""
+      password: ""
+      host: ""
+      port: ""
+
+  # ---------------------------------------------------------------------------
+  # Dev Secrets
+  # ---------------------------------------------------------------------------
+  # Generated in-cluster on first install by a pre-install hook Job
+  # (templates/dev-secrets-generator.yaml). The general Secret is shared by
+  # every service for keys that have to match across services:
+  #
+  #   HEIDI_TRUST_STATEMENTS_*                    platform-api + verifier
+  #   OID4VP_VERIFIER_FEDERATION_*                platform-api + verifier
+  #   HEIDI_ENCRYPTION_MASTER_KEY /
+  #     HEIDI_ISSUER_TRANSACTION_CODE_MASTER_KEY  platform-api + issuer
+  #   HEIDI_ISSUER_SIGNING_CONFIGURATION_ENCRYPTION_KEY
+  #                                               platform-api + issuer + verifier
+  #   HEIDI_SERVER_API_BASIC_AUTH / HEIDI_PLATFORM_BASIC_AUTH
+  #                                               platform-api + issuer + verifier
+  #
+  # Signing-client seeds are generated into signingClientSecretName instead and
+  # projected only to their owning service. The signing service receives the
+  # platform public key, never the platform seed.
+  #
+  # Precedence follows Kubernetes' envFrom rule — the last source wins for a
+  # duplicate key. The generated Secret is listed first, so anything set
+  # explicitly in <service>.devSecrets.data overrides it.
+  #
+  # Existing keys are never rotated: adding a recipe tops up the Secret on the
+  # next deploy; deleting the Secret re-rolls everything from scratch.
+  devSecrets:
+    generate:
+      enabled: true
+      # Split across two images on purpose: no single maintained image carries
+      # both openssl and kubectl (alpine/k8s ships libssl but not the openssl
+      # CLI). An init container generates the material, the main container
+      # uploads it — so neither image needs a package install at deploy time.
+      opensslImage: alpine/openssl:3.5.7
+      image: alpine/k8s:1.31.1 # provides kubectl and jq
+      secretName: heidi-dev-generated
+      # Signing-client seeds are kept in a separate Secret and projected only
+      # into their owning backend. The signing service receives only the
+      # platform client's derived public key.
+      signingClientSecretName: heidi-signing-clients
+      certDays: 730
+      # Recipe types:
+      #   random       alphanumeric string of `length`
+      #   randomBase64 base64 of `bytes` random bytes (raw AES key material)
+      #   randomHex    `bytes` random bytes as 2*bytes lowercase hex chars
+      #   ecKeyPair    P-256 keypair, each key as base64 of its full PEM text
+      #   jwk          EC P-256 key as a JWK JSON object (`use` sets sig/enc)
+      #   basicAuth    base64 of "<username>:<random>", for an Authorization header
+      #
+      # `aliases` publishes the same generated value under further keys, for the
+      # pairs that two services read from differently named variables.
+      recipes:
+        # --- shared master keys (32 random bytes as hex; the apps reject anything else) ---
+        - { name: HEIDI_PLATFORM_ENCRYPTION_MASTER_KEY, type: randomHex, bytes: 32 }
+        - { name: HEIDI_ISSUER_SESSION_ENCRYPTION_MASTER_KEY, type: randomHex, bytes: 32 }
+        # Encrypts per-request response private keys stored in verifier sessions.
+        - { name: HEIDI_VERIFIER_SESSION_ENCRYPTION_MASTER_KEY, type: randomHex, bytes: 32 }
+        - { name: HEIDI_ISSUER_SIGNING_CONFIGURATION_ENCRYPTION_KEY, type: randomHex, bytes: 32 }
+        # Encrypts the signing keys the software signer stores, and the
+        # registered-key credentials it authenticates against — read only when
+        # signing.persistence is on, generated either way like its siblings.
+        - { name: HEIDI_SIGNING_ENCRYPTION_MASTER_KEY, type: randomHex, bytes: 32 }
+        # The issuer decrypts transaction codes the platform API encrypted, with
+        # the same HKDF over the same key — one secret, two names.
+        # heidi.issuer.transaction-code-master-key has no line in the issuer's
+        # application.properties and binds straight from the environment.
+        - name: HEIDI_ENCRYPTION_MASTER_KEY
+          type: randomHex
+          bytes: 32
+          aliases: [HEIDI_ISSUER_TRANSACTION_CODE_MASTER_KEY]
+
+        # --- API keys ---
+        - { name: HEIDI_ISSUER_API_KEY, type: random, length: 32 }
+        - { name: SIGNATURE_KEY, type: random, length: 32 }
+        # Base64 HMAC key authenticating DPoP nonces. Optional for one replica —
+        # the issuer generates one when blank — but then a nonce minted by one
+        # pod is rejected by every other, so it has to be generated once here.
+        - { name: HEIDI_ISSUER_DPOP_NONCE_KEY, type: randomBase64, bytes: 32 }
+
+        # The platform API validates this header; the issuer and the verifier
+        # send it. One value, two names, so they cannot disagree.
+        - name: HEIDI_SERVER_API_BASIC_AUTH
+          type: basicAuth
+          username: api
+          aliases: [HEIDI_PLATFORM_BASIC_AUTH, HEIDI_PLATFORM_SERVER_API_BASIC_AUTH]
+
+        # --- keypairs, read by decodePem(): base64 of the whole PEM text ---
+        - name: HEIDI_TRUST_STATEMENTS_PRIVATE_KEY
+          type: ecKeyPair
+          publicKeyName: HEIDI_TRUST_STATEMENTS_PUBLIC_KEY
+        - name: OID4VP_VERIFIER_FEDERATION_PRIVATE_KEY
+          type: ecKeyPair
+          publicKeyName: OID4VP_VERIFIER_FEDERATION_PUBLIC_KEY
+
+        # --- verifier JWKs ---
+        # JwkUtil.parseOrGenerate falls back to an ephemeral key when these are
+        # blank, which is why the app still starts without them — but the keys
+        # then change on every restart and differ between replicas, so request
+        # objects and wallet response decryption break under both. Its own
+        # javadoc says a deployment must supply them; generating them once here
+        # is what makes them stable.
+        - { name: OID4VP_VERIFIER_SIGNING_JWK, type: jwk, use: sig }
+        - { name: OID4VP_VERIFIER_ENCRYPTION_JWK, type: jwk, use: enc }
+        - { name: OID4VP_VERIFIER_AUTHORITY_JWK, type: jwk, use: sig }
+        - { name: OID4VP_VERIFIER_BUND_AUTHORITY_JWK, type: jwk, use: sig }
+
+# -----------------------------------------------------------------------------
+# heidi-platform-api — the combined coordinator + entity API
+# -----------------------------------------------------------------------------
+platformApi:
+  enabled: true
+  appName: platform-api
+  port: 8080
+  replicaCount: 1
+  image:
+    name: tg4u-platform-api
+    # tag: overrides global.imageTag for this service only
+  ingress:
+    enabled: true
+    subdomain: api
+  # publicUrl overrides the address the chart hands to browsers, wallets and the
+  # other services. Defaults to https://<ingress host>; set it when the public
+  # address is not that — a port-forward, or a non-TLS local cluster.
+  # publicUrl: http://host.example:8080
+  #
+  # A development certificate authority, seeded into the local issuer at
+  # start-up so that issue-then-verify closes in an environment with no external
+  # CA on a Trusted List. Off unless a values file asks for it — it is a CA
+  # private key, and nothing outside the cluster trusts it.
+  #
+  # The keystore is generated once into the dev Secret (global.devSecrets), not
+  # on the pod, so it survives restarts, replicas and upgrades; deleting that
+  # Secret is what replaces it. Replacing it
+  # re-seeds the issuer with a new root, and credentials issued under the old one
+  # stop verifying.
+  #
+  # For anything beyond a test environment the chain has to come from a CA the
+  # verifiers already trust, configured per signing key — not from here.
+  devCa:
+    enabled: false
+    # subject: "/CN=Heidi Development CA"
+  resources:
+    requests:
+      memory: 1Gi
+    limits:
+      memory: 1Gi
+  # Actuator probes. A startupProbe fronts them, so a slow cold start shows up
+  # as a pod that is not ready yet rather than one that gets killed; the budget
+  # is startupPeriodSeconds x startupFailureThreshold, 5 minutes by default.
+  probes:
+    enabled: true
+    startupPeriodSeconds: 5
+    startupFailureThreshold: 60
+  managementPort: 8081
+  config:
+    # The upstream API creates its RP registrar client at startup. TG4U does not
+    # configure a registrar, so these reserved .invalid URLs fail closed. Replace
+    # them only when the deployment has an RP registrar to connect to.
+    HEIDI_PLATFORM_RP_REGISTRAR_BASE_URL: "https://registrar.example.invalid"
+    HEIDI_RP_REGISTRAR_TOKEN_URI: "https://registrar.example.invalid/oauth/token"
+  # This service's datasource. `name` is the database inside whichever server is
+  # configured globally — the dev Postgres or the external one — and never
+  # decides which of the two that is. With an external server, `existingSecret`
+  # names the Secret holding the credentials; see global.externalDatabase.
+  database:
+    name: heidi_platform_api
+    # existingSecret: heidi-platform-api-db-dev
+    # username: custom_user
+    # password: custom_password
+  # Used instead of the dev secrets when devSecrets.enabled is false — the
+  # production path. Names of Secrets that already exist in the namespace.
+  externalSecrets: []
+  devSecrets:
+    enabled: true
+    # Only secrets that authenticate against an EXTERNAL party belong here — a
+    # generated random value would never match the other side. Everything that
+    # is self-contained (master keys, keypairs, p12 keystores) is generated on
+    # first install; see global.devSecrets.generate for the recipes.
+    data:
+      # Required by the upstream API's OAuth client configuration. These are
+      # inert placeholders while the endpoints above use the reserved .invalid
+      # domain.
+      HEIDI_RP_REGISTRAR_CLIENT_ID: "dev-rp-registrar-client-id"
+      HEIDI_RP_REGISTRAR_CLIENT_SECRET: "dev-rp-registrar-client-secret"
+  # Raw container env, overriding every other source. Escape hatch for one-offs.
+  env: {}
+
+# -----------------------------------------------------------------------------
+# heidi-issuer — OID4VCI issuance
+# -----------------------------------------------------------------------------
+issuer:
+  enabled: true
+  appName: issuer
+  port: 8082
+  replicaCount: 1
+  image:
+    name: tg4u-issuer
+  ingress:
+    enabled: true
+    subdomain: issuer
+  resources:
+    requests:
+      memory: 800Mi
+    limits:
+      memory: 800Mi
+  # The issuer is the one service that exposes health,info,prometheus by default.
+  probes:
+    enabled: true
+    startupPeriodSeconds: 5
+    startupFailureThreshold: 60
+  managementPort: 8084
+  config:
+    # Signing follows signing.enabled — in-process when the signing service is
+    # not deployed, remote when it is. Set
+    # HEIDI_ISSUER_SIGNING_PROVIDER_BASE_URL here to use another provider.
+    # Enforcement modes: DISABLED, OPTIONAL, or REQUIRED.
+    HEIDI_ISSUER_ENFORCEMENT_DPOP: "OPTIONAL"
+    HEIDI_ISSUER_ENFORCEMENT_STATUS_LIST: "OPTIONAL"
+    HEIDI_ISSUER_ENFORCEMENT_TX_CODE: "OPTIONAL"
+    HEIDI_ISSUER_ENFORCEMENT_CLIENT_ATTESTATION: "OPTIONAL"
+    HEIDI_ISSUER_DEFERRED_INTERVAL_SECONDS: "5"
+  database:
+    name: heidi_issuer
+  externalSecrets: []
+  devSecrets:
+    enabled: true
+    # Every secret this service needs is generated — see global.devSecrets.generate.
+    data: {}
+  env: {}
+
+# -----------------------------------------------------------------------------
+# heidi-verifier — OID4VP presentation
+# -----------------------------------------------------------------------------
+verifier:
+  enabled: true
+  appName: verifier
+  port: 8083
+  replicaCount: 1
+  image:
+    name: tg4u-verifier
+  ingress:
+    enabled: true
+    subdomain: verifier
+  resources:
+    requests:
+      memory: 800Mi
+    limits:
+      memory: 800Mi
+  # Verified against the published image: /actuator/health/{readiness,liveness}
+  # both answer 200.
+  probes:
+    enabled: true
+    startupPeriodSeconds: 5
+    startupFailureThreshold: 60
+  managementPort: 8085
+  config:
+    # JWK sets used for credential signature verification where ordinary web key
+    # resolution does not work. A JSON object keyed by issuer URL.
+    HEIDI_VERIFIER_OID4VP_PREDEFINED_JWKS: "{}"
+  database:
+    name: heidi_verifier
+  externalSecrets: []
+  devSecrets:
+    enabled: true
+    # Every secret this service needs is generated — see global.devSecrets.generate.
+    data: {}
+  env: {}
+
+# -----------------------------------------------------------------------------
+# heidi-signing — the software signing provider
+# -----------------------------------------------------------------------------
+# Deploying it points the issuer, verifier and platform API at this service on
+# the cluster network. The signing service advertises the `software` URI scheme;
+# the callers authenticate as registered clients.
+signing:
+  enabled: true
+  appName: signing
+  port: 8086
+  # Deliberately empty rather than inheriting global.springProfiles. This
+  # service has no Spring Security profile — its auth is heidi.signing.auth.mode
+  # — so `no-security` is an unknown profile today, and a standing instruction
+  # to turn auth off if it ever gained one. It signs credentials; that is not a
+  # bet worth taking.
+  springProfiles: ""
+  replicaCount: 1
+  image:
+    name: tg4u-signing-service
+  # Server-to-server only — the issuer, verifier and platform API reach it on
+  # the cluster network. It signs credentials; it has no business being public.
+  ingress:
+    enabled: false
+  # The software signer keeps its keys in memory, so a restarted pod forgets
+  # every key registered with it. Turning this on moves them into the database
+  # below, encrypted with HEIDI_SIGNING_ENCRYPTION_MASTER_KEY from the dev
+  # Secret, and lets the service run its own Flyway migrations — which is what
+  # creates the tables. Off by default, since the service starts without a
+  # database at all.
+  persistence:
+    enabled: false
+  database:
+    name: heidi-signer
+  resources:
+    requests:
+      memory: 800Mi
+    limits:
+      memory: 800Mi
+  # Actuator shares the service port here — this service sets no
+  # management.server.port — so probes need no managementPort.
+  probes:
+    enabled: true
+    startupPeriodSeconds: 5
+    startupFailureThreshold: 60
+  config: {}
+  externalSecrets: []
+  devSecrets:
+    enabled: true
+    # Both tokens are generated — see global.devSecrets.generate.
+    data: {}
+  env: {}
+
+# -----------------------------------------------------------------------------
+# heidi-web — the cockpit frontend
+# -----------------------------------------------------------------------------
+web:
+  enabled: true
+  appName: web
+  port: 80
+  replicaCount: 1
+  image:
+    name: tg4u-web
+  ingress:
+    enabled: true
+    # Default frontend hostname is platform.<baseDomain>.
+    subdomain: platform
+    # hosts: []  # overrides subdomain/baseDomain entirely
+    # tlsSecretName: defaults to tls-secret-<instance>-<appName>-<environment>
+    #
+    # The ingress routes to this chart's own Service. Set backend to send it
+    # to another Service instead, which must already exist in the
+    # ingress-basic namespace.
+    # backend:
+    #   name: <service-name>
+    #   port: <port>
+  # Runtime config served as /config.json. Every service URL is filled in from
+  # the ingress hosts; only override a key that has to differ.
+  config: {}
+    # logoutUrl: "https://idp.example.com/logout"

@@ -1,0 +1,6 @@
+# Generated local test keys and certificates are disposable and must not be
+# committed.
+*.key
+*.jwk
+*.der
+*.pem

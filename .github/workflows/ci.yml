@@ -1,0 +1,246 @@
+name: TG4U CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MAVEN_ARGS: -Dmaven.repo.local=${{ github.workspace }}/.m2repo -ntp
+  TG4U_EXTENSION_GROUP_ID: ch.tg4u
+  TG4U_PLATFORM_EXTENSION_ARTIFACT: tg4u-platform-api-extension
+  TG4U_ISSUER_EXTENSION_ARTIFACT: tg4u-issuer-extension
+  TG4U_EXTENSION_VERSION: 1.0.0-SNAPSHOT
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: tg4u-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+
+jobs:
+  signer-interface:
+    name: Build signer interface
+    runs-on: ubuntu-latest
+    container: rust:1-bookworm
+    timeout-minutes: 45
+    steps:
+      - name: Check out TG4U sources
+        uses: actions/checkout@v7
+
+      - name: Read OSS revision
+        id: oss
+        run: |
+          set -euo pipefail
+          repository=$(awk -F= '$1 == "repository" {print $2}' oss.lock)
+          repository=${repository#https://github.com/}
+          repository=${repository%.git}
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "commit=$(awk -F= '$1 == "commit" {print $2}' oss.lock)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out pinned Heidi Platform
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.oss.outputs.repository }}
+          ref: ${{ steps.oss.outputs.commit }}
+          path: oss
+          fetch-depth: 1
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          gradle-version: "9.3.1"
+
+      # Both signer crates share one target directory, without debug info, to
+      # keep the Rust build within the runner's disk space.
+      - name: Publish signer interface to Maven Local
+        working-directory: oss/heidi-signing-crypto
+        env:
+          CARGO_PROFILE_DEV_DEBUG: "0"
+        # CARGO_TARGET_DIR is exported in the shell: this job runs in a container,
+        # where ${{ github.workspace }} is the host path, not the container's.
+        run: |
+          set -euo pipefail
+          export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/oss/heidi-signing-crypto/target"
+          gradle --no-daemon publishToMavenLocal -Dmaven.repo.local="$GITHUB_WORKSPACE/.m2repo"
+
+      - name: Stage signer interface
+        run: |
+          set -euo pipefail
+          mkdir -p signer-m2
+          cp -r .m2repo/org/heidiverse signer-m2/
+
+      - name: Upload signer interface
+        uses: actions/upload-artifact@v7
+        with:
+          name: tg4u-signer-interface
+          path: signer-m2
+          retention-days: 1
+
+  combined-build:
+    name: Assemble, test, and build TG4U images
+    needs: signer-interface
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Check out TG4U sources
+        uses: actions/checkout@v7
+
+      - name: Read OSS revision
+        id: oss
+        run: |
+          set -euo pipefail
+          repository=$(awk -F= '$1 == "repository" {print $2}' oss.lock)
+          repository=${repository#https://github.com/}
+          repository=${repository%.git}
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "commit=$(awk -F= '$1 == "commit" {print $2}' oss.lock)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out pinned Heidi Platform
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.oss.outputs.repository }}
+          ref: ${{ steps.oss.outputs.commit }}
+          path: oss
+          fetch-depth: 1
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 11
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: oss/heidi-web/pnpm-lock.yaml
+
+      - name: Download signer interface
+        uses: actions/download-artifact@v8
+        with:
+          name: tg4u-signer-interface
+          path: signer-m2
+
+      - name: Install signer interface into Maven Local
+        run: |
+          set -euo pipefail
+          mkdir -p .m2repo/org
+          cp -r signer-m2/heidiverse .m2repo/org/
+
+      - name: Build shared signing modules
+        working-directory: oss
+        run: mvn -B -f heidi-shared-backend/pom.xml install -DskipTests
+
+      - name: Check OSS OpenAPI snapshot
+        # This snapshot is a generic OSS contract, so validate it before TG4U
+        # controllers are added to the assembled API.
+        run: >-
+          mvn -B -f oss/heidi-platform-api/pom.xml
+          -pl heidi-platform-api-ws -am
+          -Dtest=OpenApiSnapshotIntegrationTest
+          -Dsurefire.failIfNoSpecifiedTests=false test
+
+      - name: Assemble TG4U web extension
+        run: scripts/assemble-into-platform.sh "$GITHUB_WORKSPACE/oss"
+
+      - name: Install frontend dependencies
+        working-directory: oss/heidi-web
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint combined frontend
+        working-directory: oss/heidi-web
+        run: pnpm run lint
+
+      - name: Build and type-check combined frontend
+        working-directory: oss/heidi-web
+        run: pnpm exec vite build && pnpm exec tsc -b
+
+      - name: Build and test combined platform API
+        env:
+          HEIDI_ISSUER_API_KEY: ci-test-key
+        run: |
+          set -euo pipefail
+          scripts/build-tg4u-backend.sh "$GITHUB_WORKSPACE/oss"
+          # The OSS OpenAPI snapshot must not include TG4U extension routes.
+          mvn -B -f oss/heidi-platform-api/pom.xml \
+            -Dheidi.extension.groupId="$TG4U_EXTENSION_GROUP_ID" \
+            -Dheidi.extension.artifactId="$TG4U_PLATFORM_EXTENSION_ARTIFACT" \
+            -Dheidi.extension.version="$TG4U_EXTENSION_VERSION" \
+            -Dtest='!OpenApiSnapshotIntegrationTest' \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -pl heidi-platform-api-ws -am test
+
+      - name: Test combined issuer backend
+        run: >-
+          mvn -B -f oss/heidi-issuer-backend/pom.xml
+          -Dheidi.extension.groupId="$TG4U_EXTENSION_GROUP_ID"
+          -Dheidi.extension.artifactId="$TG4U_ISSUER_EXTENSION_ARTIFACT"
+          -Dheidi.extension.version="$TG4U_EXTENSION_VERSION"
+          test
+
+      - name: Build platform API image
+        run: >-
+          mvn -B -f oss/heidi-platform-api/heidi-platform-api-ws/pom.xml
+          -Dheidi.extension.groupId="$TG4U_EXTENSION_GROUP_ID"
+          -Dheidi.extension.artifactId="$TG4U_PLATFORM_EXTENSION_ARTIFACT"
+          -Dheidi.extension.version="$TG4U_EXTENSION_VERSION"
+          -DskipTests package jib:buildTar
+
+      - name: Build issuer image
+        run: >-
+          mvn -B -f oss/heidi-issuer-backend/heidi-issuer-ws/pom.xml
+          -Dheidi.extension.groupId="$TG4U_EXTENSION_GROUP_ID"
+          -Dheidi.extension.artifactId="$TG4U_ISSUER_EXTENSION_ARTIFACT"
+          -Dheidi.extension.version="$TG4U_EXTENSION_VERSION"
+          -DskipTests package jib:buildTar
+
+      - name: Build verifier reactor
+        run: >-
+          mvn -B -f oss/heidi-verifier-backend/pom.xml
+          -pl heidi-verifier-ws -am
+          -DskipTests install
+
+      - name: Build verifier image
+        run: >-
+          mvn -B -f oss/heidi-verifier-backend/heidi-verifier-ws/pom.xml
+          -DskipTests package jib:buildTar
+
+      - name: Build signing service reactor
+        run: >-
+          mvn -B -f oss/heidi-signing-service/pom.xml
+          -pl software/service -am
+          -DskipTests install
+
+      - name: Build signing service image
+        run: >-
+          mvn -B -f oss/heidi-signing-service/software/service/pom.xml
+          -DskipTests package jib:buildTar
+
+      - name: Package web image context
+        run: tar -czf oss/heidi-web/docker/heidi-web/bin/heidi-web.tar.gz -C oss/heidi-web dist
+
+      - name: Build web image
+        run: >-
+          docker build
+          --label org.opencontainers.image.source=https://github.com/Amt-fur-Informatik-Kanton-Thurgau/TG4U
+          --tag tg4u-web:ci
+          oss/heidi-web/docker/heidi-web

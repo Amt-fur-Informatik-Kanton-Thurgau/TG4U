@@ -1,0 +1,4 @@
+# The TG4U build is assembled against this exact OSS revision.
+# Update this file in a dedicated TG4U repository PR when the OSS contract changes.
+repository=https://github.com/heidiverse/heidi-platform.git
+commit=286e2fd731734a3114be218870d24e51e3d9f51d

@@ -1,0 +1,3 @@
+{{- if (.Values.global.pathRouting | default dict).enabled }}
+{{ include "heidi.sharedIngress" . }}
+{{- end }}

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: tg4u-platform
+description: Helm chart for the TG4U platform (heidi-platform with the TG4U extensions)
+type: application
+version: 0.1.0

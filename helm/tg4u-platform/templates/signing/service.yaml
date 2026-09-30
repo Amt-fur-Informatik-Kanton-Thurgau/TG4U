@@ -1,0 +1,5 @@
+{{- $svc := .Values.signing }}
+{{- if and $svc $svc.enabled }}
+{{- $ctx := dict "Values" (merge (dict "global" .Values.global "urls" (include "heidi.urls" . | fromYaml) "configKey" "signing") $svc) "Chart" .Chart "Release" .Release "Files" .Files }}
+{{ include "heidi.service.service" $ctx }}
+{{- end }}

@@ -1,0 +1,14 @@
+{
+  "title": "Wohnsitzbestätigung",
+  "purpose": "Local presentation testing",
+  "presentationProfileId": "CUSTOM_PRESENTATION_2026_1",
+  "verifierTrustSystem": "Custom",
+  "validationMode": "DISABLED",
+  "verifierClientIdScheme": "x509_san_dns",
+  "credentialSchemes": [
+    {
+      "id": "a2f8d117-6a12-4f20-9e1d-8f9ce680aa11",
+      "attributes": [1, 2, 3, 4, 5, 6]
+    }
+  ]
+}

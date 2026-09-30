@@ -1,0 +1,7 @@
+{{- if not (.Values.global.pathRouting | default dict).enabled }}
+{{- $svc := .Values.platformApi }}
+{{- if and $svc $svc.enabled }}
+{{- $ctx := dict "Values" (merge (dict "global" .Values.global "urls" (include "heidi.urls" . | fromYaml) "configKey" "platformApi") $svc) "Chart" .Chart "Release" .Release "Files" .Files }}
+{{ include "heidi.service.ingress" $ctx }}
+{{- end }}
+{{- end }}

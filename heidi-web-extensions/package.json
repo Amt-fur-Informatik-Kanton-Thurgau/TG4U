@@ -1,0 +1,27 @@
+{
+  "name": "@tg4u/tg4u-web-extension",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "heidi": {
+    "web": {
+      "branding": {
+        "appName": "TG4U",
+        "icon": "/assets/tg4u-icon.svg",
+        "themeColor": "#327A1E"
+      }
+    }
+  },
+  "main": "./index.ts",
+  "files": [
+    "index.ts",
+    "lib",
+    "public",
+    "routes",
+    "runtime-config.d.ts",
+    "runtime-config.ts",
+    "tg4u-theme.css",
+    "translations"
+  ],
+  "types": "./index.ts"
+}

@@ -1,0 +1,15 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#327A1E" />
+  <path d="M54 0h10v64H54z" fill="#FDE303" />
+  <text
+    x="29"
+    y="40"
+    fill="#FFFFFF"
+    font-family="Arial, sans-serif"
+    font-size="19"
+    font-weight="700"
+    letter-spacing="-1"
+    text-anchor="middle"
+  >TG4U</text>
+</svg>

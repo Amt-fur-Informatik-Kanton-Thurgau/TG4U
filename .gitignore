@@ -1,0 +1,27 @@
+# Generated OSS checkout and assembly products
+/.tg4u/
+
+# Java / Maven / Gradle
+**/target/
+**/.gradle/
+/.m2repo/
+/signer-m2/
+
+# JavaScript tooling and build output
+**/node_modules/
+**/dist/
+**/coverage/
+**/.vite/
+**/.pnpm-store/
+
+# Local environment and runtime configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+config.json
+
+# IDE and operating system files
+.idea/
+*.iml
+.DS_Store
